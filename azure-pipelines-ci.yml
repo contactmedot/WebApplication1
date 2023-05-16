@@ -1,0 +1,114 @@
+# CI Pipeline for Function App
+
+trigger:
+  branches:
+    include:  
+      - develop
+      - release*
+      - hotfix*
+  paths:
+    include:
+      - src/*
+      - bicep/*
+
+name: 1.0.$(Date:yyyyMMdd)$(Rev:.r)
+
+stages:
+- stage: Build
+  displayName: 'Build'
+  jobs:
+  - job: Build
+    pool:
+      name: Default
+    steps:
+    - checkout: self
+      submodules: true
+    - task: UseDotNet@2
+      displayName: 'Install .Net 6 SDK'
+      inputs:
+        packageType: 'sdk'
+        version: '6.0.x'
+    - task: SonarCloudPrepare@1
+      inputs:
+        SonarCloud: 'Intgrtn-Reports'
+        organization: 'allymar-cpfr2'
+        scannerMode: 'MSBuild'
+        projectKey: 'cpf-r2_MAS-Intgrtn-Reports'
+        projectName: 'MAS-Intgrtn-Reports'
+        extraProperties: 'sonar.coverage.exclusions=src/**/Program.cs,src/**/APIProxyBase.cs,src/**/Startup.cs'
+    - task: DotNetCoreCLI@2
+      displayName: '.net Restore'
+      inputs:
+        command: 'restore'
+        projects: 'src/**/*.csproj'
+        feedsToUse: 'select'
+        vstsFeed: 'cdd5261a-55d8-41d0-808b-74cf5e62e397'
+    - task: DotNetCoreCLI@2
+      displayName: '.NET Build'
+      inputs:
+        command: 'build'
+        projects: 'src/*.sln'
+        arguments: '--configuration release --output $(build.artifactstagingdirectory)'
+    - task: DotNetCoreCLI@2
+      displayName: 'XUnit Testing'
+      inputs:
+        command: 'test'
+        projects: 'src/*Test*/*.csproj'
+        arguments: '--collect "Code coverage"'
+    - task: SonarCloudAnalyze@1
+    - task: SonarCloudPublish@1
+      inputs:
+        pollingTimeoutSec: '300'
+    # - task: ArchiveFiles@2
+    #   displayName: 'Archive Source Files'
+    #   inputs:
+    #     rootFolderOrFile: '$(build.SourcesDirectory)'
+    #     includeRootFolder: true
+    #     archiveType: 'zip'
+    #     archiveFile: '$(build.artifactstagingdirectory)/$(Build.BuildId).zip'
+    # - task: IASP-ALLYMAR-PROD@1
+    #   displayName: 'SAST Scan'
+    #   inputs:
+    #     ClientID: '39'
+    #     UniqueAppID: 'IASP_3030'
+    #     ModuleID: ''
+    #     SCANTYPE: 'SAST'
+    #     FILE_PATH: '$(build.artifactstagingdirectory)/$(Build.BuildId).zip'
+    #     FILE_NAME: '$(Build.BuildId).zip'
+    #     waitUntilScanComplete: 'FALSE'
+    #     waitUntilScanStart: 'FALSE'
+    - task: ArchiveFiles@2
+      displayName: 'Archive Files'
+      inputs:
+        rootFolderOrFile: '$(build.artifactstagingdirectory)'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(build.artifactstagingdirectory)/App-$(Build.BuildId).zip'
+        replaceExistingArchive: true
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Build Artifact'
+      inputs:
+        PathtoPublish: '$(build.artifactstagingdirectory)/App-$(Build.BuildId).zip'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+    - task: AzureCLI@2
+      displayName: 'Bicep Build'
+      inputs:
+        azureSubscription: 'azdo-devops-sp'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: 'az bicep build --file bicep/main.bicep'
+    - task: ArchiveFiles@2
+      displayName: 'Archive Bicep Files'
+      inputs:
+        rootFolderOrFile: 'bicep'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(build.artifactstagingdirectory)/bicep/Bicep-$(Build.BuildId).zip'
+        replaceExistingArchive: true
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Bicep Artifact'
+      inputs:
+        PathtoPublish: '$(Build.artifactstagingdirectory)/bicep'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
